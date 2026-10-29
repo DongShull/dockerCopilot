@@ -26,6 +26,7 @@ type Info struct {
 	CreateTime  string `json:"createTime"`
 	RunningTime string `json:"runningTime"`
 	HaveUpdate  bool   `json:"haveUpdate"`
+	IsCompose   bool   `json:"isCompose"`
 }
 
 func NewContainersListLogic(ctx context.Context, svcCtx *svc.ServiceContext) *ContainersListLogic {
@@ -77,6 +78,8 @@ func (l *ContainersListLogic) ContainersList() (resp *types.Resp, err error) {
 		containerInfo.CreateTime = t.Format("2006-01-02 15:04:05")
 		containerInfo.RunningTime = v.Status
 		containerInfo.HaveUpdate = v.Update
+		// 由 docker compose 创建的容器带 project 标签，前端可提示优先走 compose 更新
+		containerInfo.IsCompose = v.Labels["com.docker.compose.project"] != ""
 		containerInfoList = append(containerInfoList, containerInfo)
 	}
 	resp.Data = containerInfoList
