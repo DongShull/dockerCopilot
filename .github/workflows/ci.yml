@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - latest
+      - dev
+  pull_request:
+    branches:
+      - latest
+      - dev
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare front placeholder
+        run: |
+          mkdir -p front
+          cat > front/index.html <<'EOF'
+          <!DOCTYPE html><html><head><meta charset="UTF-8"><title>dockerCopilot</title></head><body><p>CI placeholder</p></body></html>
+          EOF
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
