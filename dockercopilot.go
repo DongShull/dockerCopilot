@@ -82,18 +82,24 @@ export const customImageLogos = {
 
 	list, err := utiles.GetImagesList(ctx)
 	if err != nil {
-		logx.Errorf("panic获取镜像列表出错: %v", err)
-		panic(err)
+		// Docker 暂不可用时不要杀死进程，交由定时任务稍后重试
+		logx.Errorf("启动时获取镜像列表失败（稍后自动重试）: %v", err)
+	} else {
+		go ctx.HubImageInfo.CheckUpdate(list)
 	}
-	go ctx.HubImageInfo.CheckUpdate(list)
 	corndanmu := cron.New(cron.WithParser(cron.NewParser(
 		cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow,
 	)))
 	_, err = corndanmu.AddFunc("30 * * * *", func() {
-		list, err := utiles.GetImagesList(ctx)
-		if err != nil {
-			logx.Errorf("panic获取镜像列表出错: %v", err)
-			panic(err)
+		defer func() {
+			if r := recover(); r != nil {
+				logx.Errorf("镜像更新检查 panic: %v", r)
+			}
+		}()
+		list, listErr := utiles.GetImagesList(ctx)
+		if listErr != nil {
+			logx.Errorf("获取镜像列表出错: %v", listErr)
+			return
 		}
 		ctx.HubImageInfo.CheckUpdate(list)
 	})
