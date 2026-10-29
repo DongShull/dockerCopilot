@@ -48,7 +48,7 @@ func BackupContainer(ctx *svc.ServiceContext) error {
 		logx.Error("Error marshalling data:", err)
 		return err
 	}
-	backupDir := os.Getenv("BACKUP_DIR") // 从环境变量中获取备份目录
+	backupDir := BackupDir() // env BACKUP_DIR > Settings > 默认 /data/backups
 	if backupDir == "" {
 		backupDir = "/data/backups" // 如果环境变量未设置，使用默认值
 	}

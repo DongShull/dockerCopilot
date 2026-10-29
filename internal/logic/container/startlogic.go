@@ -32,6 +32,7 @@ func (l *StartLogic) Start(req *types.IdReq) (resp *types.Resp, err error) {
 		resp.Data = map[string]interface{}{}
 		return resp, err
 	}
+	utiles.AuditLog("container.start", req.Id, "")
 	resp.Code = 200
 	resp.Msg = "success"
 	resp.Data = map[string]interface{}{}

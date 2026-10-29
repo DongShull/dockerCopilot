@@ -91,6 +91,10 @@ type VersionReq {
 	Type string `form:"type"`
 }
 
+type UpdateSettingsReq {
+	BackupDir string `json:"backupDir"`
+}
+
 service dockerCopilot {
 	@handler webindex
 		get /
@@ -175,6 +179,19 @@ service dockerCopilot {
 
 	@handler remove
 	delete /image/:id (RemoveImageReq) returns (Resp)
+}
+
+@server(
+	prefix: /api
+	group: settings
+	jwt: Auth
+)
+service dockerCopilot {
+	@handler GetSettings
+		get /settings returns (Resp)
+
+	@handler UpdateSettings
+		put /settings (UpdateSettingsReq) returns (Resp)
 }
 
 @server(

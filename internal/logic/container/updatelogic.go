@@ -42,6 +42,9 @@ func (l *UpdateLogic) Update(req *types.ContainerUpdateReq) (resp *types.Resp, e
 		if err != nil {
 			l.Errorf("Error in UpdateContainer: %v", err)
 		}
+		final, _ := l.svcCtx.GetProgress(taskID)
+		utiles.NotifyTaskDone("update", req.ContainerName, taskID, err == nil, final.Message)
+		utiles.AuditLog("container.update", req.ContainerName, final.Message)
 	}()
 	resp.Code = 200
 	resp.Msg = "success"

@@ -38,6 +38,7 @@ func (l *RemoveLogic) Remove(req *types.RemoveImageReq) (resp *types.Resp, err e
 		resp.Data = map[string]interface{}{}
 		return resp, nil
 	}
+	utiles.AuditLog("image.remove", req.Id, "")
 	resp.Code = 200
 	resp.Msg = "success"
 	resp.Data = map[string]interface{}{}

@@ -1,6 +1,6 @@
 # 使用 Alpine 作为基础镜像
 FROM alpine
-LABEL authors="onlyLTY"
+LABEL authors="onlyLTY, DongShull"
 WORKDIR /app
 
 ARG TARGETPLATFORM
@@ -20,5 +20,10 @@ ENV secretKey="" \
     TZ="Asia/Shanghai"
 
 VOLUME ["/data"]
+
+# 健康检查：主页可访问即视为健康
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:12712/ || exit 1
+
 # 设置启动命令
 CMD ["./start.sh"]

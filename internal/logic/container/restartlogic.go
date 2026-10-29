@@ -33,6 +33,7 @@ func (l *RestartLogic) Restart(req *types.IdReq) (resp *types.Resp, err error) {
 		resp.Data = map[string]interface{}{}
 		return resp, err
 	}
+	utiles.AuditLog("container.restart", req.Id, "")
 	resp.Code = 200
 	resp.Msg = "success"
 	resp.Data = map[string]interface{}{}

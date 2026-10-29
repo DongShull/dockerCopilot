@@ -33,6 +33,7 @@ func (l *RenameLogic) Rename(req *types.ContainerRenameReq) (resp *types.Resp, e
 		resp.Data = map[string]interface{}{}
 		return resp, err
 	}
+	utiles.AuditLog("container.rename", req.Id, "")
 	resp.Code = 200
 	resp.Msg = "success"
 	resp.Data = map[string]interface{}{}

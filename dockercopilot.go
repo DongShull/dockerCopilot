@@ -101,6 +101,22 @@ export const customImageLogos = {
 		logx.Errorf("panic添加定时任务出错: %v", err)
 		panic(err)
 	}
+	// 定时自动更新：AUTOUPDATE_CRON 为 cron 表达式，AUTOUPDATE_WHITELIST 为容器白名单
+	if cronExpr := os.Getenv("AUTOUPDATE_CRON"); cronExpr != "" {
+		_, err = corndanmu.AddFunc(cronExpr, func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logx.Errorf("自动更新任务 panic: %v", r)
+				}
+			}()
+			utiles.RunAutoUpdate(ctx)
+		})
+		if err != nil {
+			logx.Errorf("自动更新定时任务表达式非法: %v", err)
+		} else {
+			logx.Infof("自动更新已启用: %s, 白名单: %s", cronExpr, os.Getenv("AUTOUPDATE_WHITELIST"))
+		}
+	}
 	corndanmu.Start()
 	defer corndanmu.Stop()
 	httpx.SetErrorHandler(func(err error) (int, any) {

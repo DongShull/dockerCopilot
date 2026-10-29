@@ -58,6 +58,9 @@ func (l *RestoreLogic) Restore(req *types.ContainerRestoreReq) (resp *types.Resp
 		if err != nil {
 			l.Errorf("Error in restoreContainer: %v", err)
 		}
+		final, _ := l.svcCtx.GetProgress(taskID)
+		utiles.NotifyTaskDone("restore", fileName, taskID, err == nil, final.Message)
+		utiles.AuditLog("container.restore", fileName, final.Message)
 	}()
 	resp.Code = 200
 	resp.Msg = "success"

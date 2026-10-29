@@ -11,11 +11,7 @@ import (
 var backupFilenamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func BackupDir() string {
-	backupDir := os.Getenv("BACKUP_DIR")
-	if backupDir == "" {
-		backupDir = "/data/backups"
-	}
-	return backupDir
+	return EffectiveBackupDir()
 }
 
 func ResolveBackupPath(filename string, allowedExts ...string) (string, error) {
