@@ -27,16 +27,18 @@ func NewUpdateLogic(ctx context.Context, svcCtx *svc.ServiceContext) *UpdateLogi
 func (l *UpdateLogic) Update(req *types.ContainerUpdateReq) (resp *types.Resp, err error) {
 	resp = &types.Resp{}
 	taskID := uuid.New().String()
+	taskCtx := l.svcCtx.RegisterTask(taskID)
 	go func() {
 		// Catch any panic and log the error
 		defer func() {
 			if r := recover(); r != nil {
 				l.Errorf("Recovered from panic in UpdateContainer: %v", r)
 			}
+			l.svcCtx.FinishTask(taskID)
 		}()
 		imageNameAndTag := req.ImageNameAndTag
 		delOldContainer := os.Getenv("DelOldContainer") != "false"
-		err := utiles.UpdateContainer(l.svcCtx, context.Background(), req.Id, req.ContainerName, imageNameAndTag, delOldContainer, taskID)
+		err := utiles.UpdateContainer(l.svcCtx, taskCtx, req.Id, req.ContainerName, imageNameAndTag, delOldContainer, taskID)
 		if err != nil {
 			l.Errorf("Error in UpdateContainer: %v", err)
 		}

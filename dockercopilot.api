@@ -111,8 +111,17 @@ service dockerCopilot {
 	jwt: Auth
 )
 service dockerCopilot {
+	@handler ListProgress
+		get /progress returns (Resp)
+
 	@handler GetProgress
 		get /progress/:taskid (GetProgressReq) returns (Resp)
+
+	@handler CancelProgress
+		post /progress/:taskid/cancel (GetProgressReq) returns (Resp)
+
+	@handler StreamEvents
+		get /progress/:taskid/events (GetProgressReq)
 }
 
 @server(

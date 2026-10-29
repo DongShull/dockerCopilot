@@ -52,6 +52,7 @@ func (l *RestoreLogic) Restore(req *types.ContainerRestoreReq) (resp *types.Resp
 			if r := recover(); r != nil {
 				l.Errorf("Recovered from panic in restoreContainer: %v", r)
 			}
+			l.svcCtx.FinishTask(taskID)
 		}()
 		err := utiles.RestoreContainer(l.svcCtx, fileName, taskID)
 		if err != nil {

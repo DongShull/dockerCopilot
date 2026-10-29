@@ -139,8 +139,23 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 		[]rest.Route{
 			{
 				Method:  http.MethodGet,
+				Path:    "/progress",
+				Handler: progress.ListProgressHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodGet,
 				Path:    "/progress/:taskid",
 				Handler: progress.GetProgressHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodPost,
+				Path:    "/progress/:taskid/cancel",
+				Handler: progress.CancelProgressHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodGet,
+				Path:    "/progress/:taskid/events",
+				Handler: progress.StreamEventsHandler(serverCtx),
 			},
 		},
 		rest.WithJwt(serverCtx.Config.Auth.AccessSecret),
