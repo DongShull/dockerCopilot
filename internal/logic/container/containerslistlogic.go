@@ -70,8 +70,9 @@ func (l *ContainersListLogic) ContainersList() (resp *types.Resp, err error) {
 		if err != nil {
 			containerInfo.CreateImage = ""
 			l.Error("get image name error" + v.ID)
+		} else {
+			containerInfo.CreateImage = containerInspect.Config.Image
 		}
-		containerInfo.CreateImage = containerInspect.Config.Image
 		t := time.Unix(v.Created, 0)
 		containerInfo.CreateTime = t.Format("2006-01-02 15:04:05")
 		containerInfo.RunningTime = v.Status

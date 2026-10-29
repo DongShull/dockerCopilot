@@ -8,7 +8,7 @@ import (
 
 func RestartContainer(ctx *svc.ServiceContext, id string) error {
 	timeout := 10
-	signal := "SIGINT"
+	signal := "SIGTERM"
 	stopOptions := container.StopOptions{
 		Signal:  signal,
 		Timeout: &timeout,

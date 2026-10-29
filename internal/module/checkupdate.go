@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	url2 "net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,10 +22,21 @@ type ImageCheckList struct {
 	NeedUpdate bool
 }
 type ImageUpdateData struct {
+	mu   sync.RWMutex
 	Data map[string]ImageCheckList
 }
 
+// Get 返回指定镜像的更新检查结果（并发安全）。
+func (i *ImageUpdateData) Get(imageID string) (ImageCheckList, bool) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	v, ok := i.Data[imageID]
+	return v, ok
+}
+
 const ContentDigestHeader = "Docker-Content-Digest"
+
+const checkUpdateConcurrency = 4
 
 func NewImageCheck() *ImageUpdateData {
 	return &ImageUpdateData{
@@ -31,15 +44,33 @@ func NewImageCheck() *ImageUpdateData {
 	}
 }
 func (i *ImageUpdateData) CheckUpdate(imageList []types.Image) {
+	results := make(map[string]ImageCheckList)
+	var resultsMu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, checkUpdateConcurrency)
 	for _, image := range imageList {
 		if strings.Contains(image.ImageName, "0nlylty/dockercopilot") {
 			continue
 		}
-		i.checkSingleImage(image)
+		wg.Add(1)
+		go func(img types.Image) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if result, ok := i.checkSingleImage(img); ok {
+				resultsMu.Lock()
+				results[img.ID] = result
+				resultsMu.Unlock()
+			}
+		}(image)
 	}
+	wg.Wait()
+	i.mu.Lock()
+	i.Data = results
+	i.mu.Unlock()
 }
 
-func (i *ImageUpdateData) checkSingleImage(image types.Image) {
+func (i *ImageUpdateData) checkSingleImage(image types.Image) (ImageCheckList, bool) {
 	token, err := GetToken(image, "")
 	if err != nil {
 		logx.Error("获取token失败或者无需获取token，继续尝试检查" + err.Error())
@@ -47,34 +78,38 @@ func (i *ImageUpdateData) checkSingleImage(image types.Image) {
 	digestURL, err := BuildManifestURL(image)
 	if err != nil {
 		logx.Error("获取digestURL失败" + err.Error())
-		return
+		return ImageCheckList{}, false
 	}
 	remoteDigest, err := GetDigest(digestURL, token)
 	if err != nil {
 		logx.Error("获取digest失败" + err.Error())
-		return
+		return ImageCheckList{}, false
 	}
 	if len(image.RepoDigests) == 0 {
 		logx.Error("未在本地获取到repoDigest" + image.ImageName + ":" + image.ImageTag)
-		return
+		return ImageCheckList{}, false
 	}
 	needUpdate := false
 	for _, localRepoDigests := range image.RepoDigests {
-		localDigest := strings.Split(localRepoDigests, "@")[1]
+		parts := strings.Split(localRepoDigests, "@")
+		if len(parts) != 2 {
+			continue
+		}
+		localDigest := parts[1]
+		if remoteDigest == "" || localDigest == "" {
+			logx.Error("Digest为空" + image.ImageName + ":" + image.ImageTag)
+			continue
+		}
 		if remoteDigest != localDigest {
-			if remoteDigest == "" || localDigest == "" {
-				logx.Error("Digest为空" + image.ImageName + ":" + image.ImageTag)
-				continue
-			}
+			// 任一本地 digest 与远端不同即判定需要更新，不能因后续匹配被覆盖
 			logx.Info(image.ImageName + ":" + image.ImageTag + " need update")
 			logx.Infof("localDigest: %s, remoteDigest: %s", localDigest, remoteDigest)
 			needUpdate = true
 		} else {
 			logx.Info(image.ImageName + ":" + image.ImageTag + " not need update")
-			needUpdate = false
 		}
 	}
-	i.Data[image.ID] = ImageCheckList{NeedUpdate: needUpdate}
+	return ImageCheckList{NeedUpdate: needUpdate}, true
 }
 
 func BuildManifestURL(image types.Image) (string, error) {
@@ -114,7 +149,7 @@ func GetDigest(url string, token string) (string, error) {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: os.Getenv("REGISTRY_INSECURE") != "false"},
 	}
 	client := &http.Client{Transport: tr}
 

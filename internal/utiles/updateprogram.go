@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -123,7 +124,12 @@ func decompressTarGz(gzFilePath string, dest string) error {
 			return err
 		}
 
-		target := dest + "/" + header.Name
+		target := filepath.Join(dest, filepath.FromSlash(header.Name))
+		// 防止 zip-slip：解压目标必须落在 dest 目录内
+		cleanDest := filepath.Clean(dest)
+		if target != cleanDest && !strings.HasPrefix(target, cleanDest+string(os.PathSeparator)) {
+			return fmt.Errorf("非法的文件路径: %s", header.Name)
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:

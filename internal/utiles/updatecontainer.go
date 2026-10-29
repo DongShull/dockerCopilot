@@ -35,7 +35,7 @@ func UpdateContainer(serviceContext *svc.ServiceContext, id string, name string,
 		}
 	}
 	timeout := 10
-	signal := "SIGINT"
+	signal := "SIGTERM"
 
 	serviceContext.UpdateProgress(taskID, oldTaskProgress)
 	oldTaskProgress.Message = "正在拉取新镜像"
@@ -98,7 +98,7 @@ func UpdateContainer(serviceContext *svc.ServiceContext, id string, name string,
 	oldTaskProgress.Message = "正在重命名旧容器"
 	oldTaskProgress.DetailMsg = "正在重命名旧容器"
 	serviceContext.UpdateProgress(taskID, oldTaskProgress)
-	currentDate := time.Now().Format("2006-01-02-15-04-05")
+	currentDate := time.Now().Format("2006-01-02-15-04-05.000000000")
 	err = serviceContext.DockerClient.ContainerRename(context.Background(), id, name+"-"+currentDate)
 	if err != nil {
 		oldTaskProgress.Message = "重命名旧容器失败"

@@ -38,8 +38,15 @@ func GetImagesList(ctx *svc.ServiceContext) ([]MyType.Image, error) {
 func splitImageNameAndTag(imagesList []MyType.Image) []MyType.Image {
 	for i, imageInfo := range imagesList {
 		if len(imageInfo.RepoTags) != 0 {
-			imagesList[i].ImageName = strings.Split(imageInfo.RepoTags[0], ":")[0]
-			imagesList[i].ImageTag = strings.Split(imageInfo.RepoTags[0], ":")[1]
+			repoTag := imageInfo.RepoTags[0]
+			// 用最后一个冒号切分，兼容带端口的私有仓库（如 registry.example.com:5000/app:v1）
+			if idx := strings.LastIndex(repoTag, ":"); idx > 0 && !strings.Contains(repoTag[idx+1:], "/") {
+				imagesList[i].ImageName = repoTag[:idx]
+				imagesList[i].ImageTag = repoTag[idx+1:]
+			} else {
+				imagesList[i].ImageName = repoTag
+				imagesList[i].ImageTag = "None"
+			}
 		} else if len(imageInfo.RepoDigests) != 0 {
 			imagesList[i].ImageName = strings.Split(imageInfo.RepoDigests[0], "@")[0]
 			imagesList[i].ImageTag = "None"
@@ -55,13 +62,13 @@ func checkImageInUsed(svc *svc.ServiceContext, imageList []MyType.Image) ([]MyTy
 	if err != nil {
 		return imageList, err
 	}
-	// 这里可以用mapreduce 我懒等pr
+	used := make(map[string]struct{}, len(list))
 	for _, v := range list {
-		for i, imageInfo := range imageList {
-			if v.ImageID == imageInfo.ID {
-				imageList[i].InUsed = true
-				break
-			}
+		used[v.ImageID] = struct{}{}
+	}
+	for i := range imageList {
+		if _, ok := used[imageList[i].ID]; ok {
+			imageList[i].InUsed = true
 		}
 	}
 	return imageList, nil
