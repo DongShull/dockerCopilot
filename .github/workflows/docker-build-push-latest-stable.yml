@@ -10,6 +10,8 @@ on:
 
 jobs:
   build-frontend:
+    # 仅上游仓库发布 DockerHub 镜像；fork 通过 GitHub Release 分发
+    if: github.repository == 'onlyLTY/dockerCopilot'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout frontend code
