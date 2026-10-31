@@ -2,6 +2,8 @@ package utiles
 
 import (
 	"context"
+	"fmt"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/onlyLTY/dockerCopilot/internal/svc"
 	MyType "github.com/onlyLTY/dockerCopilot/internal/types"
@@ -9,12 +11,17 @@ import (
 )
 
 func GetContainerList(ctx *svc.ServiceContext) ([]MyType.Container, error) {
+	if ctx.DockerClient == nil {
+		return nil, fmt.Errorf("Docker 客户端未初始化，请检查 DOCKER_HOST 配置")
+	}
 	// 获取所有容器（包括停止的容器）
-	dockerContainerList, err := ctx.DockerClient.ContainerList(context.Background(), container.ListOptions{
+	requestCtx, cancel := dockerTimeout(context.Background(), dockerListTimeout)
+	defer cancel()
+	dockerContainerList, err := ctx.DockerClient.ContainerList(requestCtx, container.ListOptions{
 		All: true, // 设置为true来获取所有容器
 	})
 	if err != nil {
-		logx.Errorf("get container list error: %v", err)
+		logx.Errorf("获取容器列表失败: %v", err)
 		return nil, err
 	}
 	var containerList []MyType.Container

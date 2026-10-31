@@ -19,6 +19,9 @@ func ResolveBackupPath(filename string, allowedExts ...string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("非法文件名")
 	}
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("非法文件名")
+	}
 	if name != filepath.Base(name) {
 		return "", fmt.Errorf("非法文件名")
 	}
@@ -40,10 +43,13 @@ func ResolveBackupPath(filename string, allowedExts ...string) (string, error) {
 		}
 	}
 
-	base := filepath.Clean(BackupDir())
-	fullPath := filepath.Clean(filepath.Join(base, name))
-	basePrefix := base + string(os.PathSeparator)
-	if fullPath != base && !strings.HasPrefix(fullPath, basePrefix) {
+	base, err := filepath.Abs(filepath.Clean(BackupDir()))
+	if err != nil {
+		return "", fmt.Errorf("备份目录不合法")
+	}
+	fullPath := filepath.Join(base, name)
+	rel, err := filepath.Rel(base, fullPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("非法文件名")
 	}
 

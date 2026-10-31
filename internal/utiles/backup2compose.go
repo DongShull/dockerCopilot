@@ -22,10 +22,12 @@ func Backup2Compose(ctx *svc.ServiceContext) (err error) {
 		}
 		containerJSONs = append(containerJSONs, inspectedContainer)
 	}
-	err = backupCompose.DockerConfig2ComposeYaml(containerJSONs)
+	err = backupCompose.DockerConfig2ComposeYaml(containerJSONs, BackupDir())
 	if err != nil {
 		logx.Error("备份失败" + err.Error())
 		return err
 	}
+	// 与 JSON 备份共用保留策略：超出 BACKUP_KEEP（默认 7）的旧 compose 备份自动清理。
+	pruneOldBackups(BackupDir(), "backup-*.yaml", BackupKeepCount())
 	return nil
 }

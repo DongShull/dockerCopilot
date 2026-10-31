@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/onlyLTY/dockerCopilot/internal/svc"
@@ -28,7 +29,8 @@ var allowedImageTypes = map[string]string{
 
 func UploadHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. 解析 Multipart 表单
+		// 1. 解析 Multipart 表单；限制请求体总大小，避免超大文件填盘
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 		err := r.ParseMultipartForm(10 << 20) // 10MB 限制
 		if err != nil {
 			writeUploadError(w, http.StatusBadRequest, "failed to parse form")
@@ -69,10 +71,15 @@ func UploadHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			writeUploadError(w, http.StatusInternalServerError, "failed to create file on server")
 			return
 		}
-		defer dst.Close()
-
 		if _, err := io.Copy(dst, file); err != nil {
+			_ = dst.Close()
+			_ = os.Remove(dstPath)
 			writeUploadError(w, http.StatusInternalServerError, "failed to copy file content")
+			return
+		}
+		if err := dst.Close(); err != nil {
+			_ = os.Remove(dstPath)
+			writeUploadError(w, http.StatusInternalServerError, "failed to save file")
 			return
 		}
 
@@ -134,7 +141,13 @@ func writeUploadError(w http.ResponseWriter, statusCode int, msg string) {
 	})
 }
 
+var imageLogosMu sync.Mutex
+
 func updateImageLogosJS(filePath, imageName, filename string) error {
+	// 读-改-写必须串行，否则并发上传会互相覆盖。
+	imageLogosMu.Lock()
+	defer imageLogosMu.Unlock()
+
 	// 读取文件
 	contentBytes, err := os.ReadFile(filePath)
 	if err != nil {
@@ -168,5 +181,24 @@ func updateImageLogosJS(filePath, imageName, filename string) error {
 		content = content[:lastBraceIdx] + newLine + "\n" + content[lastBraceIdx:]
 	}
 
-	return os.WriteFile(filePath, []byte(content), 0644)
+	tmp, err := os.CreateTemp(filepath.Dir(filePath), ".imageLogos-*.js.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+	if err = tmp.Chmod(0644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err = tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, filePath)
 }

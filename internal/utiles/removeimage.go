@@ -7,7 +7,9 @@ import (
 )
 
 func RemoveImage(ctx *svc.ServiceContext, imageID string, force bool) error {
-	_, err := ctx.DockerClient.ImageRemove(context.Background(), imageID, image.RemoveOptions{Force: force})
+	requestCtx, cancel := dockerTimeout(context.Background(), dockerMutationTimeout)
+	defer cancel()
+	_, err := ctx.DockerClient.ImageRemove(requestCtx, imageID, image.RemoveOptions{Force: force})
 	if err != nil {
 		return err
 	}

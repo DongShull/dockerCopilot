@@ -1,18 +1,19 @@
 package main
 
 import (
-	"embed"
 	"flag"
 	"fmt"
-	"go/types"
-	"io/fs"
-	"log"
 	"net/http"
 	"os"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/onlyLTY/dockerCopilot/internal/config"
 	"github.com/onlyLTY/dockerCopilot/internal/handler"
+	"github.com/onlyLTY/dockerCopilot/internal/mcp"
 	"github.com/onlyLTY/dockerCopilot/internal/svc"
+	"github.com/onlyLTY/dockerCopilot/internal/types"
 	"github.com/onlyLTY/dockerCopilot/internal/utiles"
 	"github.com/robfig/cron/v3"
 	"github.com/zeromicro/go-zero/core/conf"
@@ -22,9 +23,6 @@ import (
 	"github.com/zeromicro/x/errors"
 	xhttp "github.com/zeromicro/x/http"
 )
-
-//go:embed front/*
-var embeddedFront embed.FS
 
 var configFile = flag.String("f", "etc/dockerCopilot.yaml", "the config file")
 
@@ -38,7 +36,7 @@ func main() {
 	logDir := "./logs"
 	ErrSetupLog := SetupLog(logDir)
 	if ErrSetupLog != nil {
-		logx.Errorf("failed to setup log: %v", ErrSetupLog)
+		logx.Errorf("初始化日志失败: %v", ErrSetupLog)
 		os.Exit(1)
 	}
 	logx.SetLevel(logx.InfoLevel)
@@ -49,6 +47,10 @@ func main() {
 	if err != nil {
 		logx.Errorf("无法加载配置文件出错: %v", err)
 		logx.Errorf("请确认secretKey设置正确，要求非纯数字且大于八位")
+		os.Exit(1)
+	}
+	if err := validateSecretKey(c.Auth.AccessSecret); err != nil {
+		logx.Errorf("secretKey 配置不合法: %v", err)
 		os.Exit(1)
 	}
 	server := rest.MustNewServer(c.RestConf, rest.WithCors("*"), rest.WithUnauthorizedCallback(
@@ -62,11 +64,16 @@ func main() {
 		}))
 	defer server.Stop()
 	ctx := svc.NewServiceContext(c)
+	if ctx.DockerInitErr != nil {
+		logx.Errorf("Docker 客户端初始化失败: %v", ctx.DockerInitErr)
+		logx.Errorf("请检查 DOCKER_HOST、DOCKER_TLS_VERIFY、DOCKER_CERT_PATH 等环境变量")
+		os.Exit(1)
+	}
 
 	// Ensure data directory and config exist (Auto-init)
 	dataDir := "/data/config/image"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		logx.Errorf("Failed to create data directory: %v", err)
+		logx.Errorf("创建数据目录失败: %v", err)
 	}
 
 	imageLogosPath := "/data/config/imageLogos.js"
@@ -76,7 +83,7 @@ export const customImageLogos = {
 };
 `)
 		if err := os.WriteFile(imageLogosPath, defaultConfig, 0644); err != nil {
-			logx.Errorf("Failed to create default imageLogos.js: %v", err)
+			logx.Errorf("创建默认 imageLogos.js 失败: %v", err)
 		}
 	}
 
@@ -119,6 +126,8 @@ export const customImageLogos = {
 		})
 		if err != nil {
 			logx.Errorf("自动更新定时任务表达式非法: %v", err)
+		} else if !utiles.AutoUpdateConfigured() {
+			logx.Errorf("自动更新未完全启用：AUTOUPDATE_WHITELIST 为空，任务将跳过")
 		} else {
 			logx.Infof("自动更新已启用: %s, 白名单: %s", cronExpr, os.Getenv("AUTOUPDATE_WHITELIST"))
 		}
@@ -140,70 +149,36 @@ export const customImageLogos = {
 		}
 	})
 	handler.RegisterHandlers(server, ctx)
-	RegisterHandlers(server)
-	fmt.Printf("Starting server at %s:%d...\n", c.Host, c.Port)
+	mcp.Register(server, ctx)
+	fmt.Printf("服务已启动: %s:%d...\n", c.Host, c.Port)
 	logx.Info("程序版本" + config.Version)
 	server.Start()
 }
-func RegisterHandlers(engine *rest.Server) {
-	frontFS, err := fs.Sub(embeddedFront, "front")
-	if err != nil {
-		log.Fatal(err)
+
+// validateSecretKey 校验 secretKey：去掉首尾空白后长度需大于 8 位，且不能是纯数字。
+func validateSecretKey(secret string) error {
+	secret = strings.TrimSpace(secret)
+	// 变量未展开（如 ${secretKey}）时长度可能“看起来”合规，必须明确拒绝。
+	if strings.Contains(secret, "${") || strings.Contains(secret, "$") {
+		return fmt.Errorf("secretKey 未展开，请直接填写真实值")
 	}
-
-	frontFileServer := http.StripPrefix("/manager", http.FileServer(http.FS(frontFS)))
-
-	assetsHandler := http.FileServer(http.FS(frontFS))
-
-	// Serve custom icons
-	iconFileServer := http.StripPrefix("/src/config/image/", http.FileServer(http.Dir("/data/config/image")))
-	engine.AddRoutes(
-		[]rest.Route{
-			{
-				Method: http.MethodGet,
-				Path:   "/src/config/image/:file",
-				Handler: func(w http.ResponseWriter, r *http.Request) {
-					iconFileServer.ServeHTTP(w, r)
-				},
-			},
-		},
-	)
-
-	engine.AddRoutes(
-		[]rest.Route{
-			{
-				Method: http.MethodGet,
-				Path:   "/manager",
-				Handler: func(w http.ResponseWriter, r *http.Request) {
-					frontFileServer.ServeHTTP(w, r)
-				},
-			},
-			{
-				Method: http.MethodGet,
-				Path:   "/manager/:path",
-				Handler: func(w http.ResponseWriter, r *http.Request) {
-					frontFileServer.ServeHTTP(w, r)
-				},
-			},
-			{
-				Method: http.MethodGet,
-				Path:   "/manager/assets/:path",
-				Handler: func(w http.ResponseWriter, r *http.Request) {
-					frontFileServer.ServeHTTP(w, r)
-				},
-			},
-			{
-				Method: http.MethodGet,
-				Path:   "/assets/:path",
-				Handler: func(w http.ResponseWriter, r *http.Request) {
-					assetsHandler.ServeHTTP(w, r)
-				},
-			},
-		},
-	)
+	if utf8.RuneCountInString(secret) <= 8 {
+		return fmt.Errorf("长度必须大于 8 位")
+	}
+	allDigits := true
+	for _, r := range secret {
+		if !unicode.IsDigit(r) {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		return fmt.Errorf("不能是纯数字")
+	}
+	return nil
 }
 
-// 检查并创建日志目录
+// ensureLogDirectory 检查并创建日志目录
 func ensureLogDirectory(logDir string) error {
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		return os.MkdirAll(logDir, 0755) // 创建目录并设置权限
@@ -224,6 +199,9 @@ func SetupLog(logDir string) error {
 		KeepDays: 7,
 		Compress: true,
 		Mode:     "file",
+		// 使用纯文本格式，日志行只保留“时间 + 级别 + 内容”，
+		// 不再输出 JSON 字段或服务名前缀。
+		Encoding: "plain",
 	}
 	logx.MustSetup(logConf)
 	logx.AddWriter(logx.NewWriter(os.Stdout))

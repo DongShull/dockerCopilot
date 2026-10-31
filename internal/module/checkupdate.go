@@ -34,6 +34,17 @@ func (i *ImageUpdateData) Get(imageID string) (ImageCheckList, bool) {
 	return v, ok
 }
 
+// Snapshot 返回当前全部检查结果的副本（并发安全），供 MCP 等外部调用方读取。
+func (i *ImageUpdateData) Snapshot() map[string]ImageCheckList {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	out := make(map[string]ImageCheckList, len(i.Data))
+	for k, v := range i.Data {
+		out[k] = v
+	}
+	return out
+}
+
 const ContentDigestHeader = "Docker-Content-Digest"
 
 const checkUpdateConcurrency = 4
@@ -49,7 +60,7 @@ func (i *ImageUpdateData) CheckUpdate(imageList []types.Image) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, checkUpdateConcurrency)
 	for _, image := range imageList {
-		if strings.Contains(image.ImageName, "0nlylty/dockercopilot") {
+		if strings.Contains(strings.ToLower(image.ImageName), "dockercopilot") {
 			continue
 		}
 		wg.Add(1)
@@ -59,6 +70,11 @@ func (i *ImageUpdateData) CheckUpdate(imageList []types.Image) {
 			defer func() { <-sem }()
 			if result, ok := i.checkSingleImage(img); ok {
 				resultsMu.Lock()
+				// 同一 image ID 可能有多个 tag。只要任意一个 tag 有更新就保留
+				// NeedUpdate=true，避免最后一个完成的 goroutine 把结果覆盖成 false。
+				if old, exists := results[img.ID]; exists {
+					result.NeedUpdate = result.NeedUpdate || old.NeedUpdate
+				}
 				results[img.ID] = result
 				resultsMu.Unlock()
 			}
@@ -71,9 +87,13 @@ func (i *ImageUpdateData) CheckUpdate(imageList []types.Image) {
 }
 
 func (i *ImageUpdateData) checkSingleImage(image types.Image) (ImageCheckList, bool) {
+	if image.ImageName == "" || image.ImageName == "None" || image.ImageTag == "" || image.ImageTag == "None" {
+		// 只有 digest、没有 tag 的镜像无法构造 manifests/<tag> 请求。
+		return ImageCheckList{}, false
+	}
 	token, err := GetToken(image, "")
 	if err != nil {
-		logx.Error("获取token失败或者无需获取token，继续尝试检查" + err.Error())
+		logx.Errorf("获取 token 失败（%s），将继续直接尝试检查", err)
 	}
 	digestURL, err := BuildManifestURL(image)
 	if err != nil {
@@ -91,22 +111,25 @@ func (i *ImageUpdateData) checkSingleImage(image types.Image) (ImageCheckList, b
 	}
 	needUpdate := false
 	for _, localRepoDigests := range image.RepoDigests {
-		parts := strings.Split(localRepoDigests, "@")
+		parts := strings.SplitN(localRepoDigests, "@", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		localDigest := parts[1]
+		localRepo, localDigest := parts[0], parts[1]
+		// 只比较同一仓库的 digest，避免同一镜像 ID 的其它 tag/仓库造成误报。
+		if localRepo != image.ImageName && !strings.HasSuffix(localRepo, "/"+image.ImageName) {
+			continue
+		}
 		if remoteDigest == "" || localDigest == "" {
 			logx.Error("Digest为空" + image.ImageName + ":" + image.ImageTag)
 			continue
 		}
 		if remoteDigest != localDigest {
-			// 任一本地 digest 与远端不同即判定需要更新，不能因后续匹配被覆盖
-			logx.Info(image.ImageName + ":" + image.ImageTag + " need update")
-			logx.Infof("localDigest: %s, remoteDigest: %s", localDigest, remoteDigest)
+			logx.Info(image.ImageName + ":" + image.ImageTag + " 有可用更新")
+			logx.Infof("本地digest: %s, 远程digest: %s", localDigest, remoteDigest)
 			needUpdate = true
 		} else {
-			logx.Info(image.ImageName + ":" + image.ImageTag + " not need update")
+			logx.Info(image.ImageName + ":" + image.ImageTag + " 无需更新")
 		}
 	}
 	return ImageCheckList{NeedUpdate: needUpdate}, true
@@ -149,11 +172,15 @@ func GetDigest(url string, token string) (string, error) {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: os.Getenv("REGISTRY_INSECURE") != "false"},
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: os.Getenv("REGISTRY_INSECURE") == "true"},
 	}
-	client := &http.Client{Transport: tr}
+	client := &http.Client{Transport: tr, Timeout: 20 * time.Second}
 
-	req, _ := http.NewRequest("HEAD", url, nil)
+	req, err := http.NewRequest("HEAD", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "dockerCopilot")
 
 	if token != "" {
 		req.Header.Add("Authorization", token)
@@ -179,7 +206,7 @@ func GetDigest(url string, token string) (string, error) {
 		if wwwAuthHeader == "" {
 			wwwAuthHeader = "not present"
 		}
-		return "", fmt.Errorf("registry responded to head request with %q, auth: %q", res.Status, wwwAuthHeader)
+		return "", fmt.Errorf("registry 对 HEAD 请求返回 %q，认证头: %q", res.Status, wwwAuthHeader)
 	}
 	return res.Header.Get(ContentDigestHeader), nil
 }

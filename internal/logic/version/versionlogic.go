@@ -2,6 +2,7 @@ package version
 
 import (
 	"context"
+	"errors"
 
 	"github.com/onlyLTY/dockerCopilot/internal/config"
 
@@ -37,8 +38,20 @@ func (l *VersionLogic) Version(req *types.VersionReq) (resp *types.Resp, err err
 		return resp, nil
 	} else if req.Type == "remote" {
 		remoteVersion, err := utiles.GetRemoteVersion()
+		if errors.Is(err, utiles.ErrFnosManagedUpdate) {
+			// FNOS 版本不走通用更新链：明确告知用户，而不是伪装成“无更新”。
+			resp.Code = 200
+			resp.Msg = err.Error()
+			resp.Data = map[string]string{
+				"remoteVersion": config.Version,
+				"fnos":          "true",
+			}
+			return resp, nil
+		}
 		if err != nil {
-			resp.Code = 50001
+			// 注意：resp.Code 会被 handler 当作 HTTP 状态码写入，业务码不能超过 999，
+			// 否则 net/http 直接丢弃响应体（曾导致错误时返回空 500）。
+			resp.Code = 500
 			resp.Msg = "获取版本错误" + err.Error()
 			resp.Data = map[string]string{
 				"remoteVersion": config.Version,

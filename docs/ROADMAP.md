@@ -24,7 +24,7 @@
 12. `checkImageInUsed` O(容器×镜像) 双重循环
 13. restore 中永假的死代码分支
 14. JWT 84 天有效、secretKey 兼作签名密钥（记录在案，暂无计划改动）
-15. `Timeout: 1e14`、CORS `*`、`InsecureSkipVerify`（已加 REGISTRY_INSECURE 开关）
+15. `Timeout: 1e14`、CORS `*`、`InsecureSkipVerify`（已加 REGISTRY_INSECURE 开关；Timeout 已改为 600000ms，SSE 路由带 `WithSSE()` 走 Accept 头豁免，见 `etc/dockerCopilot.yaml` 注释）
 
 ## 二、分期计划
 
@@ -36,6 +36,25 @@
 | P3 | 任务系统：进度落盘、TTL 清理、任务列表/取消 API、SSE 推送 | ✅ v2.2.0 |
 | P4 | FnOS 适配：去 privileged 要求、HEALTHCHECK、备份目录运行时可配（Settings API） | ✅ v2.2.0 |
 | P5 | 增强：webhook 通知、审计日志、定时自动更新白名单 | ✅ v2.2.0 |
+| P6 | 稳定性：SSE 心跳、Docker 调用超时、进度文件并发落盘、Compose 导出保真度 | ✅ 待发版 |
+| P7 | Agent 化：移除网页前端、保留 HTTP API、内置 MCP（Streamable HTTP）暴露全部能力 | ✅ 待发版 |
+
+### P6 补充说明
+
+- SSE 增加 15 秒心跳和断线重连提示，避免反向代理在任务长时间无进度时断开连接。
+- 单次 Docker list/inspect/start/stop/rename/remove 调用增加 60 秒~2 分钟超时；镜像拉取仍由任务上下文控制，避免大镜像被误杀。
+- 进度文件落盘与内存快照在同一把锁内完成，修复并发保存时旧快照覆盖新状态的问题。
+- Compose 导出补齐 healthcheck、devices、cap_add/cap_drop、security_opt、ulimits、extra_hosts、dns、tmpfs、shm_size、user、group_add、logging、stop_signal、stop_grace_period、sysctls、资源限制等字段；命名卷改用 MountPoint.Name，避免导出宿主机卷路径。
+- 恢复 `force=true` 改为“停止并临时改名旧容器 → 创建/启动新容器 → 成功后删除旧容器”；任一步失败都会清理半成品并把旧容器改回原名、恢复运行/暂停状态。
+- 备份/更新/恢复统一清洗网络端点：只保留别名、链接、驱动参数和静态 IPAM，清掉运行期 NetworkID/EndpointID/IP/MAC/DNSNames，避免重建时继承失效端点或地址冲突。
+
+### P7 补充说明
+
+- 前端（`go:embed front/*`、`/manager` 静态路由、CI 的前端构建 job）整体移除，`GET /` 改为返回 JSON 状态，同时满足容器 HEALTHCHECK 的 200 要求。
+- 保留全部 `/api/*` 路由：脚本、CI 与旧客户端不受影响，MCP 与 API 共用同一套 `internal/utiles` / `internal/logic` 实现。
+- 新增 `internal/mcp/`：基于 `mark3labs/mcp-go` 的 Streamable HTTP 服务，挂载 `/mcp`，注册 26 个 `dc_*` 工具，覆盖容器、镜像、备份恢复、进度、设置与自更新。
+- `/mcp` 默认鉴权：`MCP_TOKEN` 优先，未设置时回退 `secretKey`；支持 `Authorization: Bearer`、`X-MCP-Token`、`?token=` 三种携带方式，比较使用常量时间算法。`MCP_TOKEN=off` 可显式关闭（仅隔离内网）。
+- 破坏性 MCP 操作复用现有审计与通知；长任务复用 `RegisterTask`/`CancelTask`/`FinishTask` 与进度持久化。
 
 ## 三、配置项一览（环境变量）
 
@@ -49,10 +68,11 @@
 | `UPDATE_REPO` | DongShull/dockerCopilot | 版本检查与自更新仓库 |
 | `UPDATE_BRANCH` | latest | 版本检查分支 |
 | `githubProxy` | 空 | GitHub 代理前缀 |
-| `REGISTRY_INSECURE` | true | registry 检测是否跳过 TLS 校验（"false" 严格校验） |
+| `REGISTRY_INSECURE` | false | 设为 `true` 时 registry 检测跳过 TLS 校验（默认严格校验） |
 | `NOTIFY_WEBHOOK_URL` | 空 | 任务完成通知 webhook（POST JSON） |
 | `AUTOUPDATE_CRON` | 空 | 自动更新周期（cron 表达式，空=关闭） |
 | `AUTOUPDATE_WHITELIST` | 空 | 自动更新容器白名单（逗号分隔，`*`=全部有更新的容器） |
+| `MCP_TOKEN` | 空 | `/mcp` 访问令牌；空则回退 `secretKey`，`off` 显式关闭鉴权 |
 
 ## 四、验收标准（v2.2.0）
 
@@ -62,3 +82,5 @@
 - 重启进程后任务历史仍可查询；进行中任务可取消
 - 50 个镜像的更新检测从串行分钟级进入 10 秒级
 - 非 privileged 容器（仅挂载 docker.sock + 数据卷）可跑通全部功能
+- `go test ./internal/mcp/` 覆盖工具注册、鉴权与 Streamable HTTP 握手
+- MCP 客户端可完成「列容器 → 更新 → 查进度」全流程，`/api/*` 行为不变

@@ -1,16 +1,30 @@
 package utiles
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/onlyLTY/dockerCopilot/internal/config"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// ErrFnosManagedUpdate 表示 FNOS 版本的版本检查与自更新由专用发布包管理，
+// 不走通用在线更新链。调用方应显式向用户说明，而不是伪装成“无更新”。
+var ErrFnosManagedUpdate = errors.New("FnOS 版本由专用发布包管理，不支持在线版本检查与自更新")
+
 func GetRemoteVersion() (remoteVersion string, err error) {
+	localVersion := config.Version
+	if strings.Contains(localVersion, "FNOS") {
+		// FNOS 版本使用独立发布包，不需要也不应该访问通用版 version 文件。
+		logx.Infof("飞牛版本，不支持在线版本检查")
+		return "", ErrFnosManagedUpdate
+	}
+
 	githubProxy := os.Getenv("githubProxy")
 	if githubProxy != "" {
 		githubProxy = strings.TrimRight(githubProxy, "/") + "/"
@@ -19,12 +33,6 @@ func GetRemoteVersion() (remoteVersion string, err error) {
 	remoteVersion, err = fetchVersionFromURL(versionURL)
 	if err != nil {
 		return "0.0.0", err
-	}
-
-	localVersion := config.Version
-	if strings.Contains(localVersion, "FNOS") {
-		logx.Infof("飞牛版本，无需在线更新")
-		return localVersion, nil
 	}
 	if localVersion == remoteVersion {
 		logx.Info("版本一致:", localVersion)
@@ -38,6 +46,7 @@ func GetRemoteVersion() (remoteVersion string, err error) {
 
 func fetchVersionFromURL(url string) (string, error) {
 	client := &http.Client{
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 		},
@@ -54,7 +63,11 @@ func fetchVersionFromURL(url string) (string, error) {
 		}
 	}(resp.Body)
 
-	versionData, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("获取版本信息失败：%s", resp.Status)
+	}
+
+	versionData, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", err
 	}

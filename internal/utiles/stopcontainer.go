@@ -13,7 +13,9 @@ func StopContainer(ctx *svc.ServiceContext, id string) error {
 		Signal:  signal,
 		Timeout: &timeout,
 	}
-	err := ctx.DockerClient.ContainerStop(context.Background(), id, stopOptions)
+	requestCtx, cancel := dockerTimeout(context.Background(), dockerMutationTimeout)
+	defer cancel()
+	err := ctx.DockerClient.ContainerStop(requestCtx, id, stopOptions)
 	if err != nil {
 		return err
 	}

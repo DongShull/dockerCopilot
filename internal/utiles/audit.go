@@ -42,7 +42,12 @@ func AuditLog(action, target, detail string) {
 	if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// 简单轮转：超过 10MB 就保留一份 .1，避免长期运行无限增长。
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 10<<20 {
+		_ = os.Remove(path + ".1")
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return
 	}

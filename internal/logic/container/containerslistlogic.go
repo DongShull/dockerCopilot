@@ -2,8 +2,10 @@ package container
 
 import (
 	"context"
-	"github.com/onlyLTY/dockerCopilot/internal/utiles"
+	"strings"
 	"time"
+
+	"github.com/onlyLTY/dockerCopilot/internal/utiles"
 
 	"github.com/onlyLTY/dockerCopilot/internal/svc"
 	"github.com/onlyLTY/dockerCopilot/internal/types"
@@ -55,22 +57,25 @@ func (l *ContainersListLogic) ContainersList() (resp *types.Resp, err error) {
 		containerInfo.Id = v.ID
 		containerInfo.Status = v.State
 		if len(v.Names) > 0 {
-			ContainerName := v.Names[0][1:]
-			containerInfo.Name = ContainerName
+			containerInfo.Name = strings.TrimPrefix(v.Names[0], "/")
 		} else {
-			containerInfo.Name = "get container name error"
-			l.Error("get container name error" + v.ID)
+			containerInfo.Name = "获取容器名失败"
+			l.Error("获取容器名失败: " + v.ID)
 		}
 		if v.Image != "" {
 			containerInfo.UsingImage = v.Image
 		} else {
 			containerInfo.UsingImage = v.ImageID
-			l.Error("image dont have name" + v.ID)
+			l.Error("容器镜像无名称: " + v.ID)
 		}
 		containerInspect, err := utiles.GetContainerInspect(l.svcCtx, v.ID)
-		if err != nil {
+		if err != nil || containerInspect.Config == nil {
 			containerInfo.CreateImage = ""
-			l.Error("get image name error" + v.ID)
+			if err != nil {
+				l.Error("获取容器创建镜像失败: " + v.ID + ": " + err.Error())
+			} else {
+				l.Error("容器配置为空: " + v.ID)
+			}
 		} else {
 			containerInfo.CreateImage = containerInspect.Config.Image
 		}

@@ -28,9 +28,11 @@ type ServiceContext struct {
 	IndexCheckMiddleware       rest.Middleware
 	ProgressStore              ProgressStoreType
 	DockerClient               *client.Client
+	DockerInitErr              error
 	mu                         sync.Mutex
 	taskCancels                map[string]context.CancelFunc
 	saveMu                     sync.Mutex
+	lastProgressSave           time.Time
 }
 
 type TaskProgress struct {
@@ -49,7 +51,7 @@ type ProgressStoreType map[string]TaskProgress
 func NewServiceContext(c config.Config) *ServiceContext {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		logx.Errorf("Unable to create docker client: %s", err)
+		logx.Errorf("创建 Docker 客户端失败: %s", err)
 	}
 	ctx := &ServiceContext{
 		Config:        c,
@@ -57,6 +59,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
 		ProgressStore: make(ProgressStoreType),
 		taskCancels:   make(map[string]context.CancelFunc),
 		DockerClient:  cli,
+		DockerInitErr: err,
 	}
 	ctx.loadProgress()
 	go ctx.taskJanitor()
@@ -82,18 +85,36 @@ func (ctx *ServiceContext) loadProgress() {
 		logx.Errorf("进度文件解析失败: %v", err)
 		return
 	}
+	now := time.Now().Unix()
+	interrupted := false
 	ctx.mu.Lock()
 	for k, v := range stored {
+		if !v.IsDone {
+			// 进程刚重启，磁盘里还处于“进行中”的任务不可能再继续执行。
+			v.IsDone = true
+			v.FinishedAt = now
+			v.Percentage = 100
+			v.Message = "进程重启，任务已中断"
+			v.DetailMsg = "任务执行期间服务重启，请重新发起"
+			interrupted = true
+		}
 		ctx.ProgressStore[k] = v
 	}
 	ctx.mu.Unlock()
+	if interrupted {
+		ctx.saveProgress()
+	}
 }
 
 // saveProgress 原子写入进度文件（临时文件 + rename）。
+// 序列化和落盘都持有 ctx.mu：否则并发保存时，旧快照可能后落盘，
+// 把更新的任务状态覆盖掉。进度写入频率已被 UpdateProgress 限制，
+// 这里短暂持锁不会成为任务更新的瓶颈。
 func (ctx *ServiceContext) saveProgress() {
 	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	data, err := json.Marshal(ctx.ProgressStore)
-	ctx.mu.Unlock()
 	if err != nil {
 		logx.Errorf("进度序列化失败: %v", err)
 		return
@@ -166,8 +187,15 @@ func (ctx *ServiceContext) UpdateProgress(taskID string, progress TaskProgress) 
 		}
 	}
 	ctx.ProgressStore[taskID] = progress
+	// 高频拉取进度只留在内存；最多每秒落盘一次，完成时立即落盘。
+	shouldSave := progress.IsDone || time.Since(ctx.lastProgressSave) >= time.Second
+	if shouldSave {
+		ctx.lastProgressSave = time.Now()
+	}
 	ctx.mu.Unlock()
-	ctx.saveProgress()
+	if shouldSave {
+		ctx.saveProgress()
+	}
 }
 
 func (ctx *ServiceContext) GetProgress(taskID string) (TaskProgress, bool) {
@@ -215,6 +243,32 @@ func (ctx *ServiceContext) CancelTask(taskID string) bool {
 		cancel()
 	}
 	return ok
+}
+
+// CancelActiveTask 原子地检查并取消任务，避免“刚好完成”时被取消逻辑覆盖状态。
+func (ctx *ServiceContext) CancelActiveTask(taskID string) (ok bool, msg string) {
+	ctx.mu.Lock()
+	progress, exists := ctx.ProgressStore[taskID]
+	if !exists {
+		ctx.mu.Unlock()
+		return false, "taskID 未找到"
+	}
+	if progress.IsDone {
+		ctx.mu.Unlock()
+		return false, "任务已结束，无需取消"
+	}
+	cancel, exists := ctx.taskCancels[taskID]
+	if !exists {
+		ctx.mu.Unlock()
+		return false, "任务不可取消（可能已结束）"
+	}
+	cancel()
+	progress.Message = "正在取消..."
+	progress.DetailMsg = "已发出取消请求，任务将在当前步骤结束后停止"
+	ctx.ProgressStore[taskID] = progress
+	ctx.mu.Unlock()
+	ctx.saveProgress()
+	return true, ""
 }
 
 // FinishTask 任务收尾，释放取消句柄。

@@ -1,7 +1,10 @@
 Name: dockerCopilot
 Host: 0.0.0.0
 Port: 12712
-Timeout: 100000000000000
+# 全局请求超时 10 分钟（此前是 1e14ms≈3170 年，等于没有超时）。
+# SSE 事件流带 Accept: text/event-stream 请求头，go-zero 的 timeout 中间件对它原生豁免；
+# /mcp 的同步工具调用（拉镜像、批量检查）需要分钟级余量，因此全局值放宽到 10 分钟。
+Timeout: 600000
 Log:
   Encoding: plain
 Auth:

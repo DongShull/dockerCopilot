@@ -23,13 +23,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Prepare front placeholder
-        run: |
-          mkdir -p front
-          cat > front/index.html <<'EOF'
-          <!DOCTYPE html><html><head><meta charset="UTF-8"><title>dockerCopilot</title></head><body><p>CI placeholder</p></body></html>
-          EOF
-
       - name: Build
         run: go build ./...
 

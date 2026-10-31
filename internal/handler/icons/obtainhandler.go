@@ -15,12 +15,12 @@ import (
 func ObtainHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jsPath := "/data/config/imageLogos.js"
-		logx.Infof("Reading icons from: %s", jsPath)
+		logx.Infof("读取图标配置: %s", jsPath)
 
 		contentBytes, err := os.ReadFile(jsPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				logx.Info("Config file does not exist, returning empty.")
+				logx.Info("图标配置文件不存在，返回空")
 				httpx.OkJsonCtx(r.Context(), w, types.Resp{
 					Code: 200,
 					Msg:  "Success",
@@ -28,8 +28,8 @@ func ObtainHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 				})
 				return
 			}
-			logx.Errorf("Error reading config: %v", err)
-			httpx.ErrorCtx(r.Context(), w, fmt.Errorf("failed to read config: %v", err))
+			logx.Errorf("读取图标配置失败: %v", err)
+			httpx.ErrorCtx(r.Context(), w, fmt.Errorf("读取图标配置失败: %v", err))
 			return
 		}
 
@@ -51,7 +51,7 @@ func ObtainHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			}
 		}
 
-		logx.Infof("Total icons found: %d", len(icons))
+		logx.Infof("共解析出 %d 个图标", len(icons))
 
 		response := struct {
 			Code int               `json:"code"`

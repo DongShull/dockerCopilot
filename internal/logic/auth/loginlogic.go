@@ -2,12 +2,15 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
+	"strings"
+	"time"
+
 	"github.com/golang-jwt/jwt"
 	"github.com/onlyLTY/dockerCopilot/internal/svc"
 	"github.com/onlyLTY/dockerCopilot/internal/types"
 	"github.com/zeromicro/go-zero/core/logx"
-	"time"
 )
 
 type LoginLogic struct {
@@ -30,7 +33,15 @@ func NewLoginLogic(ctx context.Context, svcCtx *svc.ServiceContext) *LoginLogic 
 
 func (l *LoginLogic) Login(req *types.LoginReq) (resp *types.Resp, err error) {
 	resp = &types.Resp{}
-	if l.svcCtx.Config.Auth.AccessSecret != req.SecretKey {
+	expected := strings.TrimSpace(l.svcCtx.Config.Auth.AccessSecret)
+	if expected == "" {
+		resp.Code = 500
+		resp.Msg = "服务端未配置 secretKey"
+		resp.Data = JwtResponse{Jwt: ""}
+		return resp, errors.New("服务端未配置 secretKey")
+	}
+	// 恒定时间比较，避免通过响应时间逐步猜出密钥。
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(strings.TrimSpace(req.SecretKey))) != 1 {
 		resp.Code = 401
 		resp.Msg = "无效的secretKey"
 		resp.Data = JwtResponse{Jwt: ""}

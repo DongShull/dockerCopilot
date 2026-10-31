@@ -13,7 +13,9 @@ func RestartContainer(ctx *svc.ServiceContext, id string) error {
 		Signal:  signal,
 		Timeout: &timeout,
 	}
-	err := ctx.DockerClient.ContainerRestart(context.Background(), id, stopOptions)
+	requestCtx, cancel := dockerTimeout(context.Background(), dockerMutationTimeout)
+	defer cancel()
+	err := ctx.DockerClient.ContainerRestart(requestCtx, id, stopOptions)
 	if err != nil {
 		return err
 	}

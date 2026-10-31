@@ -6,7 +6,9 @@ import (
 )
 
 func RenameContainer(ctx *svc.ServiceContext, id string, newName string) error {
-	err := ctx.DockerClient.ContainerRename(context.TODO(), id, newName)
+	requestCtx, cancel := dockerTimeout(context.Background(), dockerMutationTimeout)
+	defer cancel()
+	err := ctx.DockerClient.ContainerRename(requestCtx, id, newName)
 	if err != nil {
 		return err
 	}

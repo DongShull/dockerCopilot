@@ -16,7 +16,6 @@ RUN apk add --no-cache tzdata \
 # 设置环境变量
 ENV secretKey="" \
     DOCKER_HOST="unix:///var/run/docker.sock" \
-    BACKUP_DIR="/data/backups" \
     TZ="Asia/Shanghai"
 
 VOLUME ["/data"]

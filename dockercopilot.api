@@ -60,6 +60,8 @@ type IdReq {
 
 type ContainerRestoreReq {
 	Filename string `json:"filename"`
+	Start    *bool  `json:"start,optional"`
+	Force    bool   `json:"force,optional"`
 }
 
 type DelContainerBackupReq {

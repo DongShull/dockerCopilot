@@ -7,41 +7,7 @@ on:
       - latest-dev
 
 jobs:
-  build-frontend:
-    # 仅上游仓库发布 DockerHub 镜像；fork 通过 GitHub Release 分发
-    if: github.repository == 'onlyLTY/dockerCopilot'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout frontend code
-        uses: actions/checkout@v3
-        with:
-          repository: dongshull/Docker-Copilot-React
-          path: './frontend'
-          ref: 'master'
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: |
-            frontend/package-lock.json
-            frontend/package.json
-
-      - name: Build Frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
-
-      - name: Upload Frontend Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: my-artifact-front-dist
-          path: frontend/dist
-
   build-backend:
-    needs: [ build-frontend ]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -49,15 +15,6 @@ jobs:
     steps:
       - name: Checkout code back end
         uses: actions/checkout@v3
-
-      - name: Download Frontend Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: my-artifact-front-*
-          merge-multiple: true
-          path: front
-
-      - run: ls -R front
 
       - name: Get version from file
         id: get_version
@@ -96,7 +53,7 @@ jobs:
 
   docker-setup:
     runs-on: ubuntu-latest
-    needs: [ build-frontend, build-backend ]
+    needs: build-backend
     steps:
       - name: Checkout code Now Code
         uses: actions/checkout@v3

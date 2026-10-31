@@ -46,21 +46,41 @@ func (l *RestoreLogic) Restore(req *types.ContainerRestoreReq) (resp *types.Resp
 		resp.Data = map[string]interface{}{}
 		return resp, err
 	}
+	taskCtx := l.svcCtx.RegisterTask(taskID)
 	go func() {
 		// Catch any panic and log the error
 		defer func() {
 			if r := recover(); r != nil {
-				l.Errorf("Recovered from panic in restoreContainer: %v", r)
+				l.Errorf("恢复容器任务 panic 已恢复: %v", r)
+				msg := fmt.Sprintf("恢复任务异常中断: %v", r)
+				l.svcCtx.UpdateProgress(taskID, svc.TaskProgress{
+					TaskID:     taskID,
+					Percentage: 100,
+					Name:       "恢复容器",
+					Message:    "恢复失败",
+					DetailMsg:  msg,
+					IsDone:     true,
+				})
+				utiles.NotifyTaskDone("restore", fileName, taskID, false, msg)
+				utiles.AuditLog("container.restore", fileName, msg)
 			}
 			l.svcCtx.FinishTask(taskID)
 		}()
-		err := utiles.RestoreContainer(l.svcCtx, fileName, taskID)
+		err := utiles.RestoreContainer(taskCtx, l.svcCtx, fileName, taskID, req.Start, req.Force)
 		if err != nil {
-			l.Errorf("Error in restoreContainer: %v", err)
+			l.Errorf("恢复容器出错: %v", err)
 		}
 		final, _ := l.svcCtx.GetProgress(taskID)
-		utiles.NotifyTaskDone("restore", fileName, taskID, err == nil, final.Message)
-		utiles.AuditLog("container.restore", fileName, final.Message)
+		message := final.Message
+		if message == "" {
+			message = "恢复任务已结束"
+		}
+		detail := final.DetailMsg
+		if detail == "" {
+			detail = message
+		}
+		utiles.NotifyTaskDone("restore", fileName, taskID, err == nil, message)
+		utiles.AuditLog("container.restore", fileName, detail)
 	}()
 	resp.Code = 200
 	resp.Msg = "success"

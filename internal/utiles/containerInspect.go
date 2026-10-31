@@ -7,7 +7,9 @@ import (
 )
 
 func GetContainerInspect(ctx *svc.ServiceContext, id string) (types.ContainerJSON, error) {
-	inspectedContainer, err := ctx.DockerClient.ContainerInspect(context.TODO(), id)
+	requestCtx, cancel := dockerTimeout(context.Background(), dockerInspectTimeout)
+	defer cancel()
+	inspectedContainer, err := ctx.DockerClient.ContainerInspect(requestCtx, id)
 	if err != nil {
 		return types.ContainerJSON{}, err
 	}
