@@ -1,0 +1,10 @@
+# 开发资料不进 Docker 构建上下文。
+# Dockerfile 采用白名单 COPY，这里再加一层保险。
+skills/
+docs/
+front/
+assets/
+.github/
+.git/
+logs/
+*.md
